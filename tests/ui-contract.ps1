@@ -40,6 +40,32 @@ if ($styles -notmatch '@media\(max-width:980px\)' -or $styles -notmatch '@media\
 if ($styles -match 'transition:all') {
     throw 'UI CONTRACT: transitions must name their properties.'
 }
+if ($styles -notmatch 'Segoe UI Variable Text' -or
+    $styles -notmatch 'Segoe UI Variable Display' -or
+    $styles -notmatch 'font-variant-numeric:tabular-nums') {
+    throw 'UI CONTRACT: premium typography must use the approved local font hierarchy and tabular numbers.'
+}
+if ($indexHtml -notmatch '<svg[^>]+class="brand-icon"' -or
+    $indexHtml -notmatch '<svg[^>]+class="metric-icon-svg"' -or
+    $indexHtml -notmatch 'aria-hidden="true"' -or
+    $indexHtml -match '<span class="metric-icon[^>]*>[↓↑◎#]</span>') {
+    throw 'UI CONTRACT: the premium UI must use consistent inline SVG icons instead of text glyph icons.'
+}
+if ($indexHtml -notmatch 'aria-label="关闭计费明细"' -or
+    $indexHtml -notmatch 'aria-label="刷新用量"') {
+    throw 'UI CONTRACT: actionable icons must retain accessible labels.'
+}
+if ($styles -notmatch '@keyframes surface-enter' -or
+    $styles -notmatch '@keyframes chart-rise' -or
+    $styles -notmatch '@keyframes dialog-enter' -or
+    $styles -notmatch 'animation-delay' -or
+    $styles -match 'transition:\s*all') {
+    throw 'UI CONTRACT: premium motion must be explicit, restrained, and never use transition all.'
+}
+if ($styles -notmatch 'prefers-reduced-motion:reduce' -or
+    $styles -notmatch 'chart-layout') {
+    throw 'UI CONTRACT: motion fallback and dense chart layout guards are required.'
+}
 
 $appJs = Get-Content -LiteralPath (Join-Path $projectDir 'wwwroot\app.js') -Raw
 

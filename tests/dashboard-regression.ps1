@@ -33,7 +33,7 @@ if (-not $indexHtml.Contains('<option value="today">今天</option>') -or
     -not $appJs.Contains("preset === 'since'")) {
     throw 'REGRESSION: the date presets must include today and since-first-use options.'
 }
-if ($appJs -notmatch 'formatChartDate\(item\.startTime\)' -or $appJs -notmatch 'duration <= 36 \* 3600') {
+if (-not $appJs.Contains('function formatChartDate') -or -not $appJs.Contains('duration <= 36 * 3600')) {
     throw 'REGRESSION: chart labels must adapt to short date ranges.'
 }
 if ($appJs -notmatch 'MODEL_PRICING_HISTORY' -or $appJs -notmatch 'calculateReferenceCost' -or $appJs -notmatch 'pricingEvents' -or $appJs -notmatch 'effectiveFrom' -or $indexHtml -match 'referenceInput|referenceCached|referenceOutput') {
@@ -58,6 +58,26 @@ if ($appJs -match 'const totalCost = complete \?') {
 }
 if ($appJs -notmatch '<rect class="chart-bar"' -or $appJs -match 'chart-line|chart-area' -or $appJs -notmatch 'uncachedInputTokens') {
     throw 'REGRESSION: usage trend must render one stacked bar per time bucket.'
+}
+if ($appJs -notmatch 'function getChartStep' -or
+    $appJs -notmatch 'rangeDuration > 36 \* 3600' -or
+    $appJs -notmatch 'function buildChartBuckets' -or
+    $appJs -notmatch 'shiftLocalBucket' -or
+    $appJs -notmatch 'const slotWidth = plotWidth / Math\.max\(1, grouped\.length\)' -or
+    $appJs -notmatch 'index \+ \.5' -or
+    $appJs -notmatch '86400' -or
+    $appJs -match 'item\.startTime - minTime' -or
+    $appJs -match 'nearestGap - 3') {
+    throw 'REGRESSION: long ranges must use evenly spaced daily slots and short ranges hourly slots.'
+}
+if ($appJs -notmatch 'const barTotal = ' -or
+    $appJs -notmatch 'const share = barTotal' -or
+    $appJs -notmatch 'formatPercent\(share \* 100\)') {
+    throw 'REGRESSION: chart hover details must show each segment share of its time bucket.'
+}
+if ($appJs -notmatch 'Math\.min\(22, Math\.max\(1, slotWidth - 4\)\)' -or
+    $appJs -notmatch 'formatChartPeriod\(item\.startTime, item\.endTime, chartStep\)') {
+    throw 'REGRESSION: evenly spaced chart slots must use a capped fixed-width bar and retain period details.'
 }
 if ($indexHtml -notmatch 'modelDonut|donutLegend|chartHeading' -or $appJs -notmatch 'function renderModelDonut' -or $appJs -notmatch 'state\.chartModel') {
     throw 'REGRESSION: model donut selection must drive the single detail chart.'

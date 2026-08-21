@@ -53,12 +53,22 @@ const formatMoney = (value) => { const currency = CURRENCY_RATES[state.currency]
 const formatMoneyInput = (usdValue) => ((usdValue || 0) * (CURRENCY_RATES[state.currency] || CURRENCY_RATES.USD).rate).toFixed(2);
 const formatPercent = (value) => `${(value || 0).toFixed(1)}%`;
 const formatDate = (unix, includeTime = true) => new Intl.DateTimeFormat('zh-CN', includeTime ? { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } : { month: '2-digit', day: '2-digit' }).format(new Date(unix * 1000));
-function formatChartDate(unix) {
-  const range = getRange(); const duration = Math.max(0, range.end - range.start);
+function formatChartDate(unix, durationOverride = null) {
+  const range = getRange(); const duration = durationOverride === null ? Math.max(0, range.end - range.start) : Math.max(0, durationOverride);
   const options = $('preset').value === 'today' || duration <= 36 * 3600
     ? { hour: '2-digit', minute: '2-digit' }
     : { month: '2-digit', day: '2-digit' };
   return new Intl.DateTimeFormat('zh-CN', options).format(new Date(unix * 1000));
+}
+function formatChartLabel(unix, chartStep) {
+  if (chartStep >= 86400) return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(new Date(unix * 1000));
+  return formatChartDate(unix, chartStep);
+}
+function formatChartPeriod(start, end, chartStep) {
+  const startLabel = formatChartLabel(start, chartStep);
+  if (!end || end <= start) return startLabel;
+  const endLabel = formatChartLabel(end, chartStep);
+  return startLabel === endLabel ? startLabel : `${startLabel}–${endLabel}`;
 }
 const formatCompact = (value) => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : formatNumber(value);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
@@ -144,15 +154,26 @@ function renderModelDonut(rows) {
   [...svg.querySelectorAll('.donut-segment'), svg.querySelector('.donut-center-target'), ...legend.querySelectorAll('.donut-legend-item')].filter(Boolean).forEach((element) => { element.addEventListener('click', () => selectModel(element.dataset.model || 'all')); element.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectModel(element.dataset.model || 'all'); } }); });
 }
 
+function localBucketStart(unix, step) { const date = new Date(unix * 1000); if (step >= 86400) date.setHours(0, 0, 0, 0); else date.setMinutes(0, 0, 0); return Math.floor(date.getTime() / 1000); }
+function shiftLocalBucket(unix, step, offset) { const date = new Date(unix * 1000); if (step >= 86400) date.setDate(date.getDate() + offset); else date.setHours(date.getHours() + offset); return Math.floor(date.getTime() / 1000); }
+function getChartStep() { const range = getRange(); const rangeDuration = Math.max(0, range.end - range.start); if (rangeDuration > 36 * 3600) return 86400; return $('bucket').value === '1d' ? 86400 : 3600; }
+function buildChartBuckets(rows, step) {
+  if (!rows.length) return [];
+  const source = new Map();
+  rows.forEach((row) => { const startTime = localBucketStart(row.startTime, step); const key = String(startTime); const point = source.get(key) || { startTime, endTime: shiftLocalBucket(startTime, step, 1), uncachedInputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }; const input = Math.max(row.inputTokens || 0, 0); const cached = Math.min(Math.max(row.cachedInputTokens || 0, 0), input); point.uncachedInputTokens += input - cached; point.cachedInputTokens += cached; point.outputTokens += Math.max(row.outputTokens || 0, 0); source.set(key, point); });
+  const range = getRange(); const sourceTimes = [...source.values()].map((item) => item.startTime); let first; let last;
+  if (range.start > 0) { const bucketCount = Math.max(1, Math.ceil((range.end - range.start) / step)); last = localBucketStart(range.end, step); first = shiftLocalBucket(last, step, -(bucketCount - 1)); } else { first = Math.min(...sourceTimes); last = Math.max(...sourceTimes); }
+  const timeline = []; for (let cursor = first; cursor <= last; cursor = shiftLocalBucket(cursor, step, 1)) { timeline.push(source.get(String(cursor)) || { startTime: cursor, endTime: shiftLocalBucket(cursor, step, 1), uncachedInputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }); if (cursor === last) break; }
+  return timeline;
+}
 function renderChart(rows) {
-  const svg = $('chart'); const heading = $('chartHeading'); const width = 900; const height = 260; const pad = { top: 18, right: 22, bottom: 30, left: 55 }; const visibleRows = state.chartModel === 'all' ? rows : rows.filter((row) => (row.model || '未记录模型') === state.chartModel); const grouped = [...new Map(visibleRows.map((row) => [row.startTime, { startTime: row.startTime, uncachedInputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }])).values()];
-  visibleRows.forEach((row) => { const point = grouped.find((item) => item.startTime === row.startTime); const input = Math.max(row.inputTokens || 0, 0); const cached = Math.min(Math.max(row.cachedInputTokens || 0, 0), input); point.uncachedInputTokens += input - cached; point.cachedInputTokens += cached; point.outputTokens += Math.max(row.outputTokens || 0, 0); }); grouped.sort((a, b) => a.startTime - b.startTime); heading.textContent = state.chartModel === 'all' ? '全部模型 Token 用量' : `${state.chartModel} Token 用量`;
+  const svg = $('chart'); const heading = $('chartHeading'); const width = 900; const height = 260; const pad = { top: 18, right: 22, bottom: 30, left: 55 }; const visibleRows = state.chartModel === 'all' ? rows : rows.filter((row) => (row.model || '未记录模型') === state.chartModel); const chartStep = getChartStep(); const grouped = buildChartBuckets(visibleRows, chartStep); const resolutionLabel = chartStep >= 86400 ? '按日' : '按小时'; heading.textContent = `${state.chartModel === 'all' ? '全部模型' : state.chartModel} Token 用量 · ${resolutionLabel}`;
   if (!grouped.length) { svg.innerHTML = ''; return; }
-  const plotWidth = width - pad.left - pad.right; const plotHeight = height - pad.top - pad.bottom; const max = Math.max(1, ...grouped.map((item) => item.uncachedInputTokens + item.cachedInputTokens + item.outputTokens)); const x = (index) => pad.left + (grouped.length === 1 ? plotWidth / 2 : index / (grouped.length - 1) * plotWidth); const y = (value) => height - pad.bottom - (value / max) * plotHeight; const slot = plotWidth / Math.max(1, grouped.length); const barWidth = Math.max(2, Math.min(30, slot * .55)); const series = [{ key: 'uncachedInputTokens', color: TOKEN_COLORS.uncached, label: '未缓存输入' }, { key: 'cachedInputTokens', color: TOKEN_COLORS.cached, label: '缓存输入' }, { key: 'outputTokens', color: TOKEN_COLORS.output, label: '输出' }];
+  const plotWidth = width - pad.left - pad.right; const plotHeight = height - pad.top - pad.bottom; const slotWidth = plotWidth / Math.max(1, grouped.length); const max = Math.max(1, ...grouped.map((item) => item.uncachedInputTokens + item.cachedInputTokens + item.outputTokens)); const x = (index) => pad.left + (index + .5) * slotWidth; const y = (value) => height - pad.bottom - (value / max) * plotHeight; const barWidth = Math.min(22, Math.max(1, slotWidth - 4)); const series = [{ key: 'uncachedInputTokens', color: TOKEN_COLORS.uncached, label: '未缓存输入' }, { key: 'cachedInputTokens', color: TOKEN_COLORS.cached, label: '缓存输入' }, { key: 'outputTokens', color: TOKEN_COLORS.output, label: '输出' }];
   const grid = [0, .5, 1].map((fraction) => { const value = max * fraction; const py = y(value); return `<line class="chart-grid" x1="${pad.left}" x2="${width - pad.right}" y1="${py}" y2="${py}"/><text class="chart-label" x="8" y="${py + 4}">${formatCompact(value)}</text>`; }).join('');
-  const bars = grouped.map((item, index) => { let cursor = height - pad.bottom; const segments = series.map((itemSeries) => { const value = item[itemSeries.key] || 0; const segmentHeight = Math.max(0, (value / max) * plotHeight); cursor -= segmentHeight; const rect = `<rect class="chart-bar" fill="${itemSeries.color}" x="${(x(index) - barWidth / 2).toFixed(1)}" y="${cursor.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${segmentHeight.toFixed(1)}" rx="2"><title>${state.chartModel === 'all' ? '全部模型' : escapeHtml(state.chartModel)} · ${formatChartDate(item.startTime)} · ${itemSeries.label}：${formatNumber(value)}</title></rect>`; return rect; }).join(''); return segments; }).join('');
-  const labels = grouped.map((item, index) => index % Math.max(1, Math.ceil(grouped.length / 6)) === 0 ? `<text class="chart-label" text-anchor="middle" x="${x(index)}" y="${height - 7}">${formatChartDate(item.startTime)}</text>` : '').join('');
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.style.height = ''; svg.parentElement.style.height = ''; svg.innerHTML = `${grid}${bars}${labels}`;
+  const bars = grouped.map((item, index) => { const barTotal = item.uncachedInputTokens + item.cachedInputTokens + item.outputTokens; let cursor = height - pad.bottom; const segments = series.map((itemSeries) => { const value = item[itemSeries.key] || 0; const share = barTotal ? value / barTotal : 0; const segmentHeight = Math.max(0, (value / max) * plotHeight); cursor -= segmentHeight; const rect = `<rect class="chart-bar" style="--bar-index:${index};--bar-delay:${Math.min(index, 8) * 28}" fill="${itemSeries.color}" x="${(x(index) - barWidth / 2).toFixed(1)}" y="${cursor.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${segmentHeight.toFixed(1)}" rx="2"><title>${state.chartModel === 'all' ? '全部模型' : escapeHtml(state.chartModel)} · ${formatChartPeriod(item.startTime, item.endTime, chartStep)} · ${itemSeries.label}：${formatNumber(value)} Token（占该时间段 ${formatPercent(share * 100)}）</title></rect>`; return rect; }).join(''); return segments; }).join('');
+  const tickCount = Math.min(7, Math.max(2, grouped.length)); const tickIndexes = [...new Set(Array.from({ length: tickCount }, (_, index) => Math.round(index * (grouped.length - 1) / Math.max(1, tickCount - 1))))]; const axis = tickIndexes.map((index, tickIndex) => { const tx = x(index); const anchor = tickIndex === 0 ? 'start' : tickIndex === tickIndexes.length - 1 ? 'end' : 'middle'; return `<line class="chart-axis-tick" x1="${tx.toFixed(1)}" x2="${tx.toFixed(1)}" y1="${pad.top}" y2="${height - pad.bottom}"/><text class="chart-label chart-axis-label" text-anchor="${anchor}" x="${tx.toFixed(1)}" y="${height - 7}">${formatChartLabel(grouped[index].startTime, chartStep)}</text>`; }).join('');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.style.height = ''; svg.parentElement.style.height = ''; svg.innerHTML = `${grid}${axis}${bars}`;
 }
 
 function renderPricing(rows, pricingEvents = []) {
@@ -210,7 +231,7 @@ async function loadUsage({ demo = false } = {}) {
       payload = parsed; if (!response.ok) throw new Error(payload.error || `查询失败（HTTP ${response.status}）`);
     }
     state.timelineRows = flatten(payload); state.pricingEvents = payload.pricingEvents || []; state.modelRows = payload.models || Object.values(state.timelineRows.reduce((map, row) => { const key = row.model || '未记录模型'; if (!map[key]) map[key] = { model: key, inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, nonCachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0, requests: 0, sessions: 0 }; for (const field of ['inputTokens', 'cachedInputTokens', 'cacheWriteInputTokens', 'nonCachedInputTokens', 'outputTokens', 'reasoningOutputTokens', 'totalTokens', 'requests']) map[key][field] += row[field] || 0; return map; }, {}));
-    renderMetrics(state.modelRows, payload); renderTable(state.modelRows); renderModelDonut(state.modelRows); renderChart(state.timelineRows); renderPricing(state.modelRows, state.pricingEvents); const fetched = payload.fetchedAt ? new Date(payload.fetchedAt) : new Date(); $('updatedAt').textContent = `${getRangeLabel()} · 同步于 ${fetched.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+    renderMetrics(state.modelRows, payload); renderTable(state.modelRows); renderModelDonut(state.modelRows); renderChart(state.timelineRows); renderPricing(state.modelRows, state.pricingEvents); document.body.classList.add('is-ready'); const fetched = payload.fetchedAt ? new Date(payload.fetchedAt) : new Date(); $('updatedAt').textContent = `${getRangeLabel()} · 同步于 ${fetched.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
     const sourceLabel = payload.source === 'local-codex-logs' ? `官方本地日志 · ${payload.sourceRoot || ''}` : '演示数据'; $('sourceFooter').textContent = `数据源：${sourceLabel}`; setStatus(demo ? '演示数据' : '实时在线', 'live'); if (demo) showNotice('当前为演示数据。点击“查询用量”即可读取本机官方 Codex 日志。'); else if (!Array.isArray(payload.pricingEvents)) showNotice('当前本地服务仍是旧版本，价格历史需要重启“启动仪表盘.cmd”后才能显示。');
   } catch (error) { setStatus('查询失败', 'error'); showNotice(error.message || '查询失败，请检查 Codex 日志路径。'); }
   finally { $('refresh').disabled = false; }

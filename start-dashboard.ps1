@@ -3,7 +3,7 @@ $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $project = Join-Path $projectDir 'CodexUsageDashboard.csproj'
 $runtimeRoot = Join-Path $projectDir 'bin\DashboardRuntime'
 $url = 'http://127.0.0.1:5188'
-$browserUrl = $url + '/?v=20260821-05'
+$browserUrl = $url + '/?v=20260821-10'
 $stdoutLog = Join-Path $projectDir 'dashboard-server.log'
 $stderrLog = Join-Path $projectDir 'dashboard-server-error.log'
 
