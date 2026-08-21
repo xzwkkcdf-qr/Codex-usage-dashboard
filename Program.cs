@@ -1,14 +1,7 @@
 // Project author: 可可和茶多酚
-using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddHttpClient("openai", client =>
-{
-    client.BaseAddress = new Uri("https://api.openai.com/");
-    client.Timeout = TimeSpan.FromSeconds(30);
-});
 
 var app = builder.Build();
 app.UseDefaultFiles();
@@ -37,47 +30,6 @@ app.MapGet("/api/local-usage", (HttpRequest request) =>
     return Results.Ok(BuildLocalReport(DateTimeOffset.FromUnixTimeSeconds(start), DateTimeOffset.FromUnixTimeSeconds(end), bucketWidth, home, includeArchived, model));
 });
 
-app.MapGet("/api/usage", async (HttpRequest request, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
-{
-    var apiKey = Environment.GetEnvironmentVariable("OPENAI_ADMIN_API_KEY");
-    if (string.IsNullOrWhiteSpace(apiKey)) return Results.Json(new { configured = false, error = "未检测到 OPENAI_ADMIN_API_KEY。" }, statusCode: StatusCodes.Status503ServiceUnavailable);
-    var end = ParseUnix(request.Query["end"]) ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-    var start = ParseUnix(request.Query["start"]) ?? end - 24 * 60 * 60;
-    var bucketWidth = NormalizeBucket(request.Query["bucketWidth"]);
-    var limit = ParseLimit(request.Query["limit"], bucketWidth);
-    var groupBy = NormalizeGroupBy(request.Query["groupBy"]);
-    var model = request.Query["model"].ToString();
-    var query = new List<string> { $"start_time={start}", $"end_time={end}", $"bucket_width={bucketWidth}", $"limit={limit}" };
-    foreach (var group in groupBy) query.Add($"group_by[]={Uri.EscapeDataString(group)}");
-    if (!string.IsNullOrWhiteSpace(model)) query.Add($"models[]={Uri.EscapeDataString(model)}");
-    var client = httpClientFactory.CreateClient("openai");
-    using var message = new HttpRequestMessage(HttpMethod.Get, $"v1/organization/usage/completions?{string.Join("&", query)}");
-    message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-    using var response = await client.SendAsync(message, cancellationToken);
-    var body = await response.Content.ReadAsStringAsync(cancellationToken);
-    if (!response.IsSuccessStatusCode) return Results.Json(new { configured = true, error = TryGetApiError(body) ?? $"OpenAI Usage API 返回 HTTP {(int)response.StatusCode}。" }, statusCode: StatusCodes.Status502BadGateway);
-    var payload = JsonSerializer.Deserialize<UsagePage>(body, JsonOptions.Default) ?? new UsagePage();
-    var buckets = payload.Data.Select(bucket => new
-    {
-        startTime = bucket.StartTime,
-        endTime = bucket.EndTime,
-        results = bucket.Results.Select(result => new
-        {
-            model = result.Model ?? "未分组",
-            inputTokens = result.InputTokens ?? 0,
-            cachedInputTokens = result.InputCachedTokens ?? 0,
-            cacheWriteInputTokens = result.InputCacheWriteTokens ?? 0,
-            nonCachedInputTokens = result.InputUncachedTokens ?? Math.Max((result.InputTokens ?? 0) - (result.InputCachedTokens ?? 0), 0),
-            outputTokens = result.OutputTokens ?? 0,
-            reasoningOutputTokens = 0L,
-            totalTokens = (result.InputTokens ?? 0) + (result.OutputTokens ?? 0),
-            requests = result.NumModelRequests ?? 0,
-            sessions = 0
-        })
-    });
-    return Results.Ok(new { configured = true, source = "organization-usage-api", fetchedAt = DateTimeOffset.UtcNow, query = new { start, end, bucketWidth, limit, groupBy, model }, buckets });
-});
-
 app.MapFallbackToFile("index.html");
 app.Run();
 
@@ -85,6 +37,7 @@ static object BuildLocalReport(DateTimeOffset start, DateTimeOffset end, string 
 {
     var modelTotals = new Dictionary<string, UsageAggregate>(StringComparer.OrdinalIgnoreCase);
     var timeline = new Dictionary<long, Dictionary<string, UsageAggregate>>();
+    var pricingEvents = new List<object>();
     var sessionCount = 0;
     var tokenEventCount = 0;
     var total = new UsageAggregate("全部");
@@ -105,6 +58,15 @@ static object BuildLocalReport(DateTimeOffset start, DateTimeOffset end, string 
             var model = string.IsNullOrWhiteSpace(item.Model) ? "未记录模型" : item.Model!;
             if (!ModelMatches(model, modelFilter)) continue;
             Add(modelTotals, model, delta, sessionName);
+            pricingEvents.Add(new
+            {
+                timestamp = item.Timestamp.ToUnixTimeSeconds(),
+                model,
+                inputTokens = delta.InputTokens,
+                cachedInputTokens = delta.CachedInputTokens,
+                cacheWriteInputTokens = delta.CacheWriteInputTokens,
+                outputTokens = delta.OutputTokens
+            });
             var bucketStart = FloorBucket(item.Timestamp, bucketWidth).ToUnixTimeSeconds();
             if (!timeline.TryGetValue(bucketStart, out var bucketRows)) timeline[bucketStart] = bucketRows = new Dictionary<string, UsageAggregate>(StringComparer.OrdinalIgnoreCase);
             Add(bucketRows, model, delta, sessionName);
@@ -130,7 +92,8 @@ static object BuildLocalReport(DateTimeOffset start, DateTimeOffset end, string 
         query = new { start = start.ToUnixTimeSeconds(), end = end.ToUnixTimeSeconds(), bucketWidth, includeArchived },
         summary = new { sessionCount, tokenEventCount, inputTokens = total.InputTokens, cachedInputTokens = total.CachedInputTokens, cacheWriteInputTokens = total.CacheWriteInputTokens, nonCachedInputTokens = total.NonCachedInputTokens, outputTokens = total.OutputTokens, reasoningOutputTokens = total.ReasoningOutputTokens, totalTokens = total.TotalTokens, requests = total.Requests },
         models = modelRows,
-        buckets
+        buckets,
+        pricingEvents
     };
 }
 
@@ -229,11 +192,8 @@ static long BucketSeconds(string bucket) => bucket switch { "1m" => 60, "1d" => 
 static string ResolveCodexHome(string? value = null) => Path.GetFullPath(value ?? Environment.GetEnvironmentVariable("CODEX_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex"));
 static long? ParseUnix(string? value) => long.TryParse(value, out var parsed) ? parsed : null;
 static string NormalizeBucket(string? value) => value is "1m" or "1h" or "1d" ? value : "1h";
-static int ParseLimit(string? value, string bucket) => int.TryParse(value, out var parsed) ? Math.Clamp(parsed, 1, bucket switch { "1m" => 1440, "1h" => 168, _ => 31 }) : bucket switch { "1m" => 1440, "1h" => 168, _ => 31 };
-static string[] NormalizeGroupBy(string? value) => (value ?? "model").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(item => item is "model" or "project_id" or "user_id" or "api_key_id" or "service_tier" or "batch").Distinct().Take(3).DefaultIfEmpty("model").ToArray();
 static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 static long ReadLong(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.TryGetInt64(out var result) ? result : 0;
-static string? TryGetApiError(string body) { try { using var document = JsonDocument.Parse(body); return document.RootElement.TryGetProperty("error", out var error) ? ReadString(error, "message") ?? error.ToString() : body; } catch (JsonException) { return body.Length > 300 ? body[..300] : body; } }
 
 sealed class LocalTokenEvent(DateTimeOffset timestamp, UsageSnapshot usage, string? model)
 {
@@ -261,17 +221,3 @@ readonly record struct UsageSnapshot(long InputTokens = 0, long CachedInputToken
 {
     public static UsageSnapshot Delta(UsageSnapshot current, UsageSnapshot previous) => new(Math.Max(current.InputTokens - previous.InputTokens, 0), Math.Max(current.CachedInputTokens - previous.CachedInputTokens, 0), Math.Max(current.CacheWriteInputTokens - previous.CacheWriteInputTokens, 0), Math.Max(current.OutputTokens - previous.OutputTokens, 0), Math.Max(current.ReasoningOutputTokens - previous.ReasoningOutputTokens, 0), Math.Max(current.TotalTokens - previous.TotalTokens, 0));
 }
-
-sealed class UsagePage { [JsonPropertyName("data")] public List<UsageBucket> Data { get; init; } = []; }
-sealed class UsageBucket { [JsonPropertyName("start_time")] public long StartTime { get; init; } [JsonPropertyName("end_time")] public long EndTime { get; init; } [JsonPropertyName("results")] public List<UsageResult> Results { get; init; } = []; }
-sealed class UsageResult
-{
-    [JsonPropertyName("input_tokens")] public long? InputTokens { get; init; }
-    [JsonPropertyName("input_cached_tokens")] public long? InputCachedTokens { get; init; }
-    [JsonPropertyName("input_cache_write_tokens")] public long? InputCacheWriteTokens { get; init; }
-    [JsonPropertyName("input_uncached_tokens")] public long? InputUncachedTokens { get; init; }
-    [JsonPropertyName("output_tokens")] public long? OutputTokens { get; init; }
-    [JsonPropertyName("num_model_requests")] public long? NumModelRequests { get; init; }
-    [JsonPropertyName("model")] public string? Model { get; init; }
-}
-static class JsonOptions { public static readonly JsonSerializerOptions Default = new() { PropertyNameCaseInsensitive = true }; }
