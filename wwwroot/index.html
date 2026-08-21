@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0d12">
+  <title>Codex 官方账号用量分析</title>
+  <link rel="stylesheet" href="/styles.css?v=20260821-01">
+</head>
+<body class="editorial-theme">
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark" aria-hidden="true">C</div><div><p class="eyebrow">LOCAL CODEX USAGE</p><h1>Codex 官方账号用量分析</h1></div></div>
+      <div class="live-status" id="liveStatus" aria-live="polite"><span class="status-dot"></span><span>等待查询</span></div>
+    </header>
+
+    <section class="control-panel panel" aria-label="查询条件">
+      <div class="control-heading"><div><p class="section-kicker">读取本机日志</p><h2>直接分析官方账号的 token_count 记录</h2><p class="helper">默认读取 <code>%USERPROFILE%\.codex\sessions</code> 和 archived_sessions</p></div><label class="switch-label"><input id="autoRefresh" type="checkbox" checked><span class="switch"></span>每 60 秒刷新</label></div>
+      <div class="filters">
+        <label>时间范围<select id="preset"><option value="today">今天</option><option value="24h">最近 24 小时</option><option value="7d" selected>最近 7 天</option><option value="30d">最近 30 天</option><option value="custom">自定义</option></select></label>
+        <label>时间粒度<select id="bucket"><option value="1h" selected>按小时</option><option value="1d">按天</option><option value="1m">按分钟</option></select></label>
+        <label>数据源<select id="source"><option value="local" selected>官方账号本地日志</option><option value="api">Organization Usage API</option></select></label>
+        <label>模型筛选（可选）<input id="model" type="text" placeholder="例如 gpt-5.6-luna"></label>
+        <div class="button-stack"><button id="refresh" class="primary-button" type="button"><span aria-hidden="true">↻</span> 查询用量</button><button id="demo" class="ghost-button" type="button">查看演示数据</button></div>
+      </div>
+      <div class="custom-range" id="customRange" hidden><label>开始时间<input id="startDate" type="datetime-local"></label><label>结束时间<input id="endDate" type="datetime-local"></label></div>
+    </section>
+
+    <section class="notice" id="notice" hidden role="status" aria-live="polite"></section>
+
+    <section class="metric-grid" aria-label="汇总指标">
+      <article class="metric-card"><div class="metric-top"><span>输入 Token</span><span class="metric-icon blue">↓</span></div><strong id="inputMetric">—</strong><small id="inputSub">等待数据</small></article>
+      <article class="metric-card"><div class="metric-top"><span>缓存命中</span><span class="metric-icon green">◎</span></div><strong id="cachedMetric">—</strong><small id="cachedSub">输入 Token 的缓存比例</small></article>
+      <article class="metric-card"><div class="metric-top"><span>输出 Token</span><span class="metric-icon orange">↑</span></div><strong id="outputMetric">—</strong><small id="outputSub">等待数据</small></article>
+      <article class="metric-card"><div class="metric-top"><span>Session / 请求</span><span class="metric-icon purple">#</span></div><strong id="requestMetric">—</strong><small id="requestSub">等待数据</small></article>
+    </section>
+
+    <section class="panel chart-panel"><div class="chart-layout"><aside class="model-donut"><div class="donut-header"><p class="section-kicker">模型分布</p><span>点击切换</span></div><svg id="modelDonut" class="model-donut-svg" viewBox="0 0 180 180" role="img" aria-label="模型 Token 占比环图"></svg><div id="donutLegend" class="donut-legend"></div><p class="donut-hint">点击中心显示全部模型</p></aside><div class="chart-main"><div class="panel-header"><div><p class="section-kicker">趋势</p><h2 id="chartHeading">全部模型 Token 用量</h2></div><span class="updated" id="updatedAt">尚未同步</span></div><div class="chart-wrap"><svg id="chart" viewBox="0 0 900 260" role="img" aria-label="Token 使用柱状图"></svg></div><div class="legend"><span><i class="legend-swatch input"></i>未缓存输入</span><span><i class="legend-swatch cached"></i>缓存输入</span><span><i class="legend-swatch output"></i>输出</span></div></div></div></section>
+
+    <section class="panel table-panel"><div class="panel-header"><div><p class="section-kicker">模型分类</p><h2>按模型汇总</h2></div><span class="row-count" id="rowCount">0 行</span></div><div class="table-scroll"><table><thead><tr><th>模型</th><th class="number">输入</th><th class="number">缓存输入</th><th class="number">命中率</th><th class="number">输出</th><th class="number">总 Token</th><th class="number">请求</th><th class="number">Session</th></tr></thead><tbody id="usageRows"><tr><td colspan="8" class="empty-cell">执行查询后显示明细</td></tr></tbody></table></div></section>
+
+    <section class="panel pricing-panel"><div class="panel-header"><div><p class="section-kicker">套餐实用性</p><h2>输入时间段套餐价格，反推等效每 1M Token 价格</h2><p class="helper">套餐价格和下方成本均只针对当前选定时间段；切换日期后会重新计算。</p><p class="helper" id="pricePeriod">当前计算时间段：最近 7 天</p></div><span class="calc-badge">OpenAI 官方标准价</span></div><div class="price-controls"><label>本时间段套餐价格（$）<input id="packagePrice" type="number" min="0" step="0.01" value="100"></label><div class="pricing-source"><strong>按模型自动匹配官方价格</strong><span>标准 API · 短上下文 · $/1M Token · 更新于 2026-08-20</span><a href="https://platform.openai.com/pricing" target="_blank" rel="noreferrer">查看 OpenAI 价格页 ↗</a></div></div><div class="price-summary"><div><span>本时间段官方参考成本</span><strong id="referenceCost">—</strong></div><div><span>套餐折算系数</span><strong id="priceScale">—</strong></div><div><span>本时间段实际用量</span><strong id="pricedTokens">—</strong></div></div><div class="table-scroll"><table><thead><tr><th>模型</th><th class="number">套餐分摊</th><th class="number">等效输入<br>$/1M</th><th class="number">等效缓存输入<br>$/1M</th><th class="number">等效输出<br>$/1M</th><th class="number">官方参考成本</th></tr></thead><tbody id="priceRows"><tr><td colspan="6" class="empty-cell">查询用量后计算</td></tr></tbody></table></div><p class="footnote">说明：按 OpenAI 官方标准 API 价格（短上下文）和当前时间段本地日志计算；模型未匹配到价格时显示“—”，不计入参考成本和套餐折算。</p></section>
+
+    <footer><span id="sourceFooter">数据源：等待查询</span><div class="footer-notes"><span>作者：可可和茶多酚 · 模型仅在当前时间范围有 token_count 时显示 · 本地日志只读</span><span class="usage-notice">本软件由 Codex 配合 GPT 开发 · 免费使用，不得用于商业用途 · 转载请注明出处</span></div></footer>
+  </main>
+  <script src="/app.js?v=20260821-01" defer></script>
+</body>
+</html>

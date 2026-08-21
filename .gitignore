@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+node_modules/
+evidence/
+dashboard-server*.log
+docs/superpowers/
+.open-design.json
+package.json
+pnpm-lock.yaml
