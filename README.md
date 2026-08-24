@@ -1,6 +1,6 @@
 # Codex Usage Ledger（Codex 用量账簿）
 
-![Codex Usage Ledger 图标](assets/codex-usage-ledger.svg)
+![Codex Usage Ledger 仪表盘界面](assets/codex-usage-ledger-dashboard.png)
 
 一款面向 Codex 用户的本地用量账簿：读取当前 Windows 用户的本机 Codex 日志，按模型、时间与 Token 类型汇总用量，并使用已确认的 OpenAI / DeepSeek 官方历史 API 单价计算参考成本。
 

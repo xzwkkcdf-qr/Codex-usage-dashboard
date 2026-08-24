@@ -29,6 +29,7 @@ Assert-Contains $ignoreFile '(?m)^\*\.sha256$' 'checksum files must stay out of 
 $requiredFiles = @(
     'assets\codex-usage-ledger.svg',
     'assets\codex-usage-ledger.ico',
+    'assets\codex-usage-ledger-dashboard.png',
     'LICENSE.txt',
     'release-assets\使用说明.txt',
     'release-assets\版本信息.txt'
@@ -41,6 +42,7 @@ foreach ($relativePath in $requiredFiles) {
 
 $readme = Get-Content -LiteralPath (Join-Path $projectDir 'README.md') -Raw
 Assert-Contains $readme '# Codex Usage Ledger（Codex 用量账簿）' 'README must use the release product name.'
+Assert-Contains $readme '!\[Codex Usage Ledger 仪表盘界面\]\(assets/codex-usage-ledger-dashboard\.png\)' 'README must lead with a real dashboard preview.'
 Assert-Contains $readme 'CodexUsageLedger-v1\.0\.0-win-x64\.zip' 'README must explain the portable package.'
 Assert-Contains $readme 'CodexUsageLedger\.exe' 'README must tell nontechnical users which program to open.'
 Assert-Contains $readme '不上传原始会话' 'README must state the local-only privacy boundary.'
