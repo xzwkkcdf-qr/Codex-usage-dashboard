@@ -1,69 +1,75 @@
-# Codex 官方账号用量分析仪表盘
+# Codex Usage Ledger（Codex 用量账簿）
 
-这是一个本地网页仪表盘，默认读取官方 Codex 登录态产生的本机日志：
+![Codex Usage Ledger 图标](assets/codex-usage-ledger.svg)
+
+一款面向 Codex 用户的本地用量账簿：读取当前 Windows 用户的本机 Codex 日志，按模型、时间与 Token 类型汇总用量，并使用已确认的 OpenAI / DeepSeek 官方历史 API 单价计算参考成本。
+
+数据仅在本机读取和计算，不需要 API Key，不上传原始会话。
+
+## 免安装使用（推荐）
+
+从 [GitHub Releases](https://github.com/xzwkkcdf-qr/codex-usage-dashboard/releases) 下载：
 
 ```text
-%USERPROFILE%\\.codex\\sessions\\**\\*.jsonl
-%USERPROFILE%\\.codex\\archived_sessions\\*.jsonl
+CodexUsageLedger-v1.0.0-win-x64.zip
 ```
 
-日志里的 `token_count` 事件包含累计的输入、缓存输入、缓存写入、输出、推理输出和总 Token。本项目会对每个 Session 做增量计算，再按模型汇总，避免重复累计。
+完整解压后双击 `CodexUsageLedger.exe`。程序不会弹出 CMD 窗口，会在本地服务就绪后自动打开默认浏览器。首次运行不需要安装 .NET；需要停止时，在任务管理器结束 `CodexUsageLedger.exe` 即可。
 
-## 启动
+默认地址：`http://127.0.0.1:5188`
 
-环境要求：Windows 与 .NET 10 SDK。
-
-克隆仓库并首次编译：
+如不希望自动打开浏览器，可在命令行运行：
 
 ```powershell
-git clone https://github.com/xzwkkcdf-wq/codex-usage-dashboard.git
-cd codex-usage-dashboard
-dotnet restore
-dotnet build
+.\CodexUsageLedger.exe --no-browser
 ```
 
-之后直接双击项目根目录的 `启动仪表盘.cmd`，或在 PowerShell 中运行：
-
-```powershell
-.\启动仪表盘.ps1
-```
-
-脚本会自动启动本地服务并打开浏览器，关闭脚本窗口即可停止服务。
-
-更新项目文件后，重新运行启动脚本即可；脚本会识别并替换同一仪表盘占用的旧实例，价格历史需要新版服务返回每条用量的时间戳。
-
-如果浏览器没有自动打开，请手动访问 `http://127.0.0.1:5188`。不要直接双击 `wwwroot/index.html`，否则网页没有本地服务地址，查询会显示连接失败。启动故障会记录在 `dashboard-server-error.log`。
+请保留解压目录中的全部文件，不要只复制 EXE。发布页同时提供 `.sha256` 文件用于校验下载包。
 
 ## 功能
 
-- 官方账号本地日志实时读取，不需要 API Key、不上传原始会话
-- 数据源固定为本机官方 Codex 日志，不包含远程 Usage API 或 API Key 配置
-- 按模型分类统计输入、缓存输入、缓存命中率、输出、总 Token、请求和 Session
 - 今天、最近 24 小时、7 天、30 天、从使用以来或自定义时间范围
-- 切换时间范围和时间粒度后会自动重新查询并重绘趋势图
-- 按分钟、小时、天查看趋势
-- Professional 深色模式：深炭黑工作台、明黄主操作、高对比数据表与自适应图表布局
-- 输入套餐总价后，按照内置的 OpenAI 与 DeepSeek 官方模型标准 API 历史价格反推每个模型的等效输入、缓存输入和输出单价
-- 支持一键切换美元 / 人民币，主价格表、套餐实用性和计费明细会同步换算；人民币采用页面标注的本地固定汇率，仅作展示换算
-- 支持打开当前计费明细，逐条核对时间、模型、模式、Token、官方单价、参考成本和确认状态
-- 已确认的历史价格正常计入；无法确认的历史区间单独显示，不会用猜测值覆盖
+- 按分钟、小时或天显示均匀时间柱，每根柱子按未缓存输入、缓存输入和输出分段
+- 左侧模型分布圆环与右侧单张柱状图联动，不同模型清晰区分
+- 按模型汇总输入、缓存输入、命中率、输出、总 Token、请求和 Session
+- 按每条记录的模型与使用日期匹配 OpenAI / DeepSeek 已确认的官方历史价格
+- 美元 / 人民币一键切换，所有价格相关内容同步换算
+- 当前计费明细可展开核对时间、模型、Token、官方单价、参考成本与确认状态
+- 中文 / English 主题化下拉切换，默认中文
+- Night Editorial 深色数据终端界面，自适应桌面与移动端
 
-模型名称会从 `thread_settings_applied`、`world_state` 和 `turn_context` 等日志事件读取；模型只有在当前时间范围内存在 `token_count` 用量时才会出现在表格中。如果想确认较早使用过的模型，请切换到“最近 30 天”或自定义范围。
+## 数据原理
 
-## 套餐价格计算逻辑
-
-网页按每条用量记录的模型和时间，自动匹配内置的 OpenAI 与 DeepSeek 官方标准 API 价格（短上下文）；时间范围跨越调价时，会按历史价格分别计算。官方资料无法确认的历史区间不会猜测，也不会计入参考成本和套餐折算。
+默认读取：
 
 ```text
-参考成本 = 非缓存输入 / 1M × 输入参考价
-          + 缓存输入 / 1M × 缓存参考价
-          + 输出 / 1M × 输出参考价
-
-折算系数 = 套餐总价 / 参考成本
-等效单价 = 参考单价 × 折算系数
+%USERPROFILE%\.codex\sessions\**\*.jsonl
+%USERPROFILE%\.codex\archived_sessions\*.jsonl
 ```
 
-这属于基于本机真实 Token 用量的 API 等效估算，不是 OpenAI 或 DeepSeek 对 ChatGPT/Codex/订阅额度的官方账单。价格目录包含官方来源链接和生效时间，价格变更以官方页面为准。
+日志中的 `token_count` 是 Session 内的累计值。项目按同一 Session 的相邻记录计算增量，再按模型与时间桶汇总，从而避免重复累计。模型名称来自 `thread_settings_applied`、`world_state` 和 `turn_context` 等事件。
+
+浏览器只向本机的 ASP.NET Core 服务请求聚合结果：
+
+```text
+本机 Codex 日志 → 本地 ASP.NET Core 服务 → 聚合 JSON → 浏览器图表
+```
+
+服务仅监听回环地址 `127.0.0.1`。原始会话不会由项目上传；页面中的官方价格链接只有在用户点击后才会访问对应网站。
+
+## 官方价格与套餐优惠倍数
+
+网页按每条用量记录的模型和时间自动匹配内置的 OpenAI 与 DeepSeek 官方标准 API 价格。时间范围跨越调价时，会分别使用对应历史区间；无法确认的历史价格不会猜测，也不会计入已确认参考成本。
+
+```text
+参考成本 = 非缓存输入 / 1M × 官方输入单价
+          + 缓存输入 / 1M × 官方缓存输入单价
+          + 输出 / 1M × 官方输出单价
+
+套餐优惠倍数 = 套餐总价 / 已确认官方参考成本
+```
+
+套餐优惠倍数只是本地比较指标，不代表 ChatGPT Plus / Codex 套餐的官方额度、账单或扣费。真实套餐额度和重置时间以官方页面为准。
 
 价格来源：
 
@@ -74,6 +80,30 @@ dotnet build
 - [DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/)
 - [DeepSeek API Change Log](https://api-docs.deepseek.com/updates/)
 
+## 从源码运行
+
+源码开发需要 Windows 与 .NET 10 SDK：
+
+```powershell
+git clone https://github.com/xzwkkcdf-qr/codex-usage-dashboard.git
+cd codex-usage-dashboard
+dotnet restore
+dotnet build
+.\启动仪表盘.ps1
+```
+
+也可双击 `启动仪表盘.cmd`。不要直接打开 `wwwroot/index.html`，因为页面需要本地服务提供聚合数据。
+
+## 构建便携版
+
+```powershell
+.\build-release.ps1
+```
+
+脚本会运行测试、发布 Windows x64 自包含版本，并在 `artifacts` 目录生成 ZIP 和 SHA-256 校验文件。
+
 ## 使用声明
 
-本项目使用 Codex 配合 GPT 辅助开发，免费提供使用，不得用于商业用途；转载或二次分享请注明出处。
+作者：可可和茶多酚。
+
+本项目使用 Codex 配合 GPT 辅助开发，免费提供使用，不得用于商业用途；转载、二次分享或发布修改版本时请注明原项目、作者与仓库出处。完整条款见 [LICENSE.txt](LICENSE.txt)。

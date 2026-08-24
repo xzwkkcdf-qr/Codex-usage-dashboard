@@ -10,3 +10,7 @@ docs/superpowers/
 .open-design.json
 package.json
 pnpm-lock.yaml
+artifacts/
+.release-cache/
+*.zip
+*.sha256

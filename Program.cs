@@ -1,7 +1,37 @@
 // Project author: 可可和茶多酚
+// Codex Usage Ledger · Codex 配合 GPT 辅助开发
+using System.Diagnostics;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
-var builder = WebApplication.CreateBuilder(args);
+const string DefaultServerUrl = "http://127.0.0.1:5188";
+const string ProductName = "Codex Usage Ledger";
+const string ProductVersion = "1.0.0";
+const uint MessageBoxError = 0x00000010;
+const uint MessageBoxWarning = 0x00000030;
+
+var noBrowser = args.Any(item => string.Equals(item, "--no-browser", StringComparison.OrdinalIgnoreCase));
+var serverUrl = ReadServerUrl(args, DefaultServerUrl);
+var builderArgs = RemoveLauncherArguments(args);
+
+if (string.Equals(serverUrl, DefaultServerUrl, StringComparison.OrdinalIgnoreCase) && IsPortListening(5188))
+{
+    if (IsExistingDashboardHealthy(serverUrl))
+    {
+        Console.WriteLine(ProductName + " 已在运行，正在打开已有页面。端口：" + serverUrl);
+        TryOpenBrowser(BuildBrowserUrl(serverUrl));
+        return;
+    }
+
+    Console.Error.WriteLine("无法启动 " + ProductName + "：端口 5188 已被其他程序占用。未结束其他程序，请关闭占用端口的程序后重试。");
+    ShowStartupMessage("端口 5188 已被其他程序占用。\n\n请关闭占用该端口的程序后重试。没有结束其他程序。", MessageBoxError);
+    Environment.ExitCode = 1;
+    return;
+}
+
+var builder = WebApplication.CreateBuilder(builderArgs);
+builder.WebHost.UseUrls(serverUrl);
 
 var app = builder.Build();
 app.UseDefaultFiles();
@@ -13,6 +43,8 @@ app.UseStaticFiles(new StaticFileOptions
 app.MapGet("/api/health", () => Results.Ok(new
 {
     ok = true,
+    app = ProductName,
+    version = ProductVersion,
     localLogs = DiscoverSessionFiles(ResolveCodexHome(), true).Count > 0,
     codexHome = ResolveCodexHome(),
     serverTime = DateTimeOffset.UtcNow
@@ -31,7 +63,118 @@ app.MapGet("/api/local-usage", (HttpRequest request) =>
 });
 
 app.MapFallbackToFile("index.html");
+
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    Console.WriteLine(ProductName + " v" + ProductVersion + " 已启动：" + serverUrl);
+    Console.WriteLine("数据仅在本机读取，浏览器访问回环地址。");
+    if (noBrowser)
+    {
+        Console.WriteLine("已跳过自动打开浏览器（--no-browser）。");
+        return;
+    }
+
+    TryOpenBrowser(BuildBrowserUrl(serverUrl));
+});
+
 app.Run();
+
+static string ReadServerUrl(string[] arguments, string fallback)
+{
+    for (var index = 0; index < arguments.Length; index++)
+    {
+        var argument = arguments[index];
+        if (argument.StartsWith("--urls=", StringComparison.OrdinalIgnoreCase)) return argument[7..];
+        if (string.Equals(argument, "--urls", StringComparison.OrdinalIgnoreCase) && index + 1 < arguments.Length) return arguments[index + 1];
+    }
+    return fallback;
+}
+
+static string[] RemoveLauncherArguments(string[] arguments)
+{
+    var filtered = new List<string>();
+    for (var index = 0; index < arguments.Length; index++)
+    {
+        var argument = arguments[index];
+        if (string.Equals(argument, "--no-browser", StringComparison.OrdinalIgnoreCase)) continue;
+        if (argument.StartsWith("--urls=", StringComparison.OrdinalIgnoreCase)) continue;
+        if (string.Equals(argument, "--urls", StringComparison.OrdinalIgnoreCase))
+        {
+            index++;
+            continue;
+        }
+        filtered.Add(argument);
+    }
+    return filtered.ToArray();
+}
+
+static bool IsPortListening(int port)
+{
+    try
+    {
+        using var client = new TcpClient();
+        client.Connect("127.0.0.1", port);
+        return true;
+    }
+    catch (SocketException)
+    {
+        return false;
+    }
+}
+
+static bool IsExistingDashboardHealthy(string serverUrl)
+{
+    try
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(900) };
+        var body = client.GetStringAsync(serverUrl.TrimEnd('/') + "/api/health").GetAwaiter().GetResult();
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        if (root.TryGetProperty("app", out var app) && string.Equals(app.GetString(), ProductName, StringComparison.Ordinal)) return true;
+        return root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True && root.TryGetProperty("localLogs", out var localLogs) && localLogs.ValueKind == JsonValueKind.True;
+    }
+    catch (HttpRequestException)
+    {
+        return false;
+    }
+    catch (TaskCanceledException)
+    {
+        return false;
+    }
+    catch (JsonException)
+    {
+        return false;
+    }
+}
+
+static string BuildBrowserUrl(string serverUrl) => serverUrl.TrimEnd('/') + "/?v=20260824-01";
+
+static void TryOpenBrowser(string url)
+{
+    try
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = "\"" + url + "\"",
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+        Console.WriteLine("已打开浏览器：" + url);
+    }
+    catch (Exception exception)
+    {
+        var message = "浏览器未能自动打开。请手动访问：\n" + url + "\n\n" + exception.Message;
+        Console.WriteLine(message);
+        ShowStartupMessage(message, MessageBoxWarning);
+    }
+}
+
+static void ShowStartupMessage(string message, uint type)
+{
+    try { StartupDialog.MessageBox(nint.Zero, message, ProductName, type); }
+    catch { }
+}
 
 static object BuildLocalReport(DateTimeOffset start, DateTimeOffset end, string bucketWidth, string home, bool includeArchived, string modelFilter = "")
 {
@@ -220,4 +363,10 @@ sealed class UsageAggregate(string model)
 readonly record struct UsageSnapshot(long InputTokens = 0, long CachedInputTokens = 0, long CacheWriteInputTokens = 0, long OutputTokens = 0, long ReasoningOutputTokens = 0, long TotalTokens = 0)
 {
     public static UsageSnapshot Delta(UsageSnapshot current, UsageSnapshot previous) => new(Math.Max(current.InputTokens - previous.InputTokens, 0), Math.Max(current.CachedInputTokens - previous.CachedInputTokens, 0), Math.Max(current.CacheWriteInputTokens - previous.CacheWriteInputTokens, 0), Math.Max(current.OutputTokens - previous.OutputTokens, 0), Math.Max(current.ReasoningOutputTokens - previous.ReasoningOutputTokens, 0), Math.Max(current.TotalTokens - previous.TotalTokens, 0));
+}
+
+static class StartupDialog
+{
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int MessageBox(nint hWnd, string text, string caption, uint type);
 }

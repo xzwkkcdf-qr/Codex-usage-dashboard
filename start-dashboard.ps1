@@ -3,7 +3,7 @@ $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $project = Join-Path $projectDir 'CodexUsageDashboard.csproj'
 $runtimeRoot = Join-Path $projectDir 'bin\DashboardRuntime'
 $url = 'http://127.0.0.1:5188'
-$browserUrl = $url + '/?v=20260821-10'
+$browserUrl = $url + '/?v=20260824-01'
 $stdoutLog = Join-Path $projectDir 'dashboard-server.log'
 $stderrLog = Join-Path $projectDir 'dashboard-server-error.log'
 
@@ -56,7 +56,7 @@ try {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     $quote = [char]34
-    $startInfo.Arguments = $quote + $dll + $quote + ' --urls ' + $quote + $url + $quote
+    $startInfo.Arguments = $quote + $dll + $quote + ' --urls ' + $quote + $url + $quote + ' --no-browser'
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     $server = [System.Diagnostics.Process]::new()

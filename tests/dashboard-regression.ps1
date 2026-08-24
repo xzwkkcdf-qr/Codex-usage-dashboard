@@ -27,8 +27,8 @@ if (-not $presetListener.Success -or $presetListener.Groups[1].Value -notmatch '
 if ($program -notmatch 'FileShare\.ReadWrite') {
     throw 'REGRESSION: active Codex session logs must be opened with FileShare.ReadWrite.'
 }
-if (-not $indexHtml.Contains('<option value="today">今天</option>') -or
-    -not $indexHtml.Contains('<option value="since">从使用以来</option>') -or
+if ($indexHtml -notmatch '<option value="today"[^>]*>今天</option>' -or
+    $indexHtml -notmatch '<option value="since"[^>]*>从使用以来</option>' -or
     -not $appJs.Contains("preset === 'today'") -or
     -not $appJs.Contains("preset === 'since'")) {
     throw 'REGRESSION: the date presets must include today and since-first-use options.'
