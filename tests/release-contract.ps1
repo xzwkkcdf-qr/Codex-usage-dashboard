@@ -60,6 +60,12 @@ if ($program -match 'Stop-Process|Process\.Kill') {
     throw 'RELEASE CONTRACT: the executable must never kill an unrelated process occupying the port.'
 }
 
+$launcher = Get-Content -LiteralPath (Join-Path $projectDir 'start-dashboard.ps1') -Raw
+Assert-Contains $launcher 'CodexUsageLedger\.dll' 'the source launcher must start the renamed assembly.'
+if ($launcher -match 'CodexUsageDashboard\.dll') {
+    throw 'RELEASE CONTRACT: the source launcher must not use the pre-release assembly name.'
+}
+
 $buildScriptPath = Join-Path $projectDir 'build-release.ps1'
 if (-not (Test-Path -LiteralPath $buildScriptPath -PathType Leaf)) {
     throw 'RELEASE CONTRACT: build-release.ps1 is required for nontechnical users.'

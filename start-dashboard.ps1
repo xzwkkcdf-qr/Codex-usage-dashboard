@@ -40,7 +40,7 @@ try {
     # Build into a fresh folder so an older dotnet host cannot lock the DLL we need to replace.
     $runtimeId = Get-Date -Format 'yyyyMMdd-HHmmssfff'
     $runtimeDir = Join-Path $runtimeRoot ('run-' + $runtimeId)
-    $dll = Join-Path $runtimeDir 'CodexUsageDashboard.dll'
+    $dll = Join-Path $runtimeDir 'CodexUsageLedger.dll'
     New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
     Write-Host 'Building the latest dashboard...' -ForegroundColor Cyan
     $outputPathArgument = '-p:OutputPath=' + $runtimeDir
